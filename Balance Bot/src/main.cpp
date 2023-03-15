@@ -11,35 +11,55 @@
 
 #include <Arduino_LSM9DS1.h>
 
+//GLOBAL VARIABLES
+const char PWMB = 11;
+const char BIN2 = 10;
+const char BIN1 = 9;
+const char STBY = 8;
+const char AIN1 = 7;
+const char AIN2 = 6;
+const char PWMA = 5;
+
+float accelAngle[2];
+float gyroAngle[2];
+float totalAngle[2];
+
+unsigned long currTime, deltaTime, lastTime;
+
+float PID, error, previousError;
+
+//degrees = (radians * 4068) / 71
+
+int kp = 0;
+int ki = 0;
+int kd = 0;
+
+float targetAngle = 0;
+
 void setup() {
   // put your setup code here, to run once:
-  Serial.begin(9600);
-  while (!Serial);
-  Serial.println("Started");
 
-  if (!IMU.begin()) {
-    Serial.println("Failed to initialize IMU!");
-    while (1);
-  }
-  Serial.print("Gyroscope sample rate = ");
-  Serial.print(IMU.gyroscopeSampleRate());
-  Serial.println(" Hz");
-  Serial.println();
-  Serial.println("Gyroscope in degrees/second");
-  Serial.println("X\tY\tZ");
+  //Initialize arduino pins
+  pinMode(AIN1, OUTPUT);
+  pinMode(AIN2, OUTPUT);
+  pinMode(BIN1, OUTPUT);
+  pinMode(BIN2, OUTPUT);
+  pinMode(PWMA, OUTPUT);
+  pinMode(PWMB, OUTPUT);
+
+  //Set the starting time for well, timing! (in milliseconds).
+  currTime = millis();
+
 }
 
 void loop() {
   // put your main code here, to run repeatedly:
-  float x, y, z;
+  float GX, GY, GZ, AX, AY, AZ; //Gyro and Accel xyz variables.
 
-  if (IMU.gyroscopeAvailable()) {
-    IMU.readGyroscope(x, y, z);
-
-    Serial.print(x);
-    Serial.print('\t');
-    Serial.print(y);
-    Serial.print('\t');
-    Serial.println(z);
-  }
+  IMU.readAcceleration(AX, AY, AZ);
+  IMU.readGyroscope(GX, GY, GZ);
+  // Read the Gyro and Accel. Data
+  //Insert into PID Control
+  //Update Motor output accordingly,
+   
 }
