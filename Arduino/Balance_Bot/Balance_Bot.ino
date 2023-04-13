@@ -39,7 +39,7 @@ int Kp = 2.0;
 int Ki = 0.5;
 int Kd = 0.5;
 
-float setPoint = 0.0;
+float setPoint = 90.0;
 float err = 0.0;
 float integral = 0.0;
 float prevErr = 0.0;
@@ -78,6 +78,8 @@ void setup() {
     //Failed to initialize IMU!
     while(1);
   }
+
+  Serial.begin(9600);
 
   // Set Nano Pins 
   pinMode(aIN1, OUTPUT);
@@ -125,9 +127,9 @@ void SetMotorA(int pwmOutA, bool dir) {
     digitalWrite(aIN2, LOW);  // set leg 2 of the motor driver high
   }
 
-  int speed = map(constrain(abs(pwmOutA), 0, 255), 0, 255, MotorALow, 255);  // Sets the PWM for Motor A
+  //int speed = map(constrain(abs(pwmOutA), 0, 255), 0, 255, MotorALow, 255);  // Sets the PWM for Motor A
             
-  analogWrite(PWMA, speed);
+  analogWrite(PWMA, pwmOutA);
 }
 
 /*
@@ -148,11 +150,46 @@ void SetMotorB(int pwmOutB, bool dir) {
   }
 
   // map the PID output to the DC motor outputs. If your DC motor has a different min value update it in global variables.
-  int speed = map(constrain(abs (pwmOutB), 0, 255), 0, 255, MotorBLow, 255);  // Sets the PWM for Motor B
+  //int speed = map(constrain(abs (pwmOutB), 0, 255), 0, 255, MotorBLow, 255);  // Sets the PWM for Motor B
             
-  analogWrite(PWMB, speed);
+  analogWrite(PWMB, pwmOutB);
 }
 
+void SetMotors(int A, int B)  {
+
+  if( A > 0 )//Thats positive
+  {
+    digitalWrite(aIN1, LOW);   // set leg 1 of the motor driver low
+    digitalWrite(aIN2, HIGH);  // set leg 2 of the motor driver high
+  }
+  else 
+  {
+    digitalWrite(aIN1, HIGH);   // set leg 1 of the motor driver low
+    digitalWrite(aIN2, LOW);  // set leg 2 of the motor driver high
+  }
+  
+  int _speedA = map(constrain(abs(A), 0, 255), 0, 255, MotorALow, 255);  // Sets the PWM for Motor A
+            
+
+  analogWrite(PWMA, _speedA); 
+
+  if( B > 0 )//Thats positive
+  {
+    digitalWrite(bIN1, LOW);   // set leg 1 of the motor driver low
+    digitalWrite(bIN2, HIGH);  // set leg 2 of the motor driver high
+  }
+  else 
+  {
+    digitalWrite(bIN1, HIGH);   // set leg 1 of the motor driver low
+    digitalWrite(bIN2, LOW);  // set leg 2 of the motor driver high
+  }
+  
+  int _speedB = map(constrain(abs(B), 0, 255), 0, 255, MotorBLow, 255);  // Sets the PWM for Motor A
+            
+
+  analogWrite(PWMB, _speedB); 
+
+}
 void loop() {
   // put your main code here, to run repeatedly:
   /*if(IMU.accelerationAvailable()){
@@ -227,7 +264,9 @@ void PIDBalance(){
   //float angle = atan2(a.acceleration.y, a.acceleration.z) * 180.0 / PI; This is accPitch.
   
   //err = angle - setPoint;
-  err = accPitch - ctrlValues[0];
+  //err = accPitch - ctrlValues[0];
+  //err = gyroPitch - ctrlValues[0];
+  err = complementaryPitch - ctrlValues[0];
   
   integral += err * dT;
 
@@ -236,6 +275,24 @@ void PIDBalance(){
   deriv = (err - prevErr) / dT;
 
   int motorSpeed = (Kp * err) + iTerm + (Kd * deriv);
+
+  Serial.println(accPitch);
+  //SetMotors(motorSpeed, motorSpeed);
+//  //SetMotorA(motorSpeed, true);
+//  //SetMotorB(motorSpeed, true);
+//  //Serial.println(motorSpeed);
+//  
+//  if(motorSpeed > 0)
+//  {
+//    SetMotorA(motorSpeed, true);
+//    SetMotorB(motorSpeed, true);
+//  }
+//  else
+//  {
+//    SetMotorA(motorSpeed, false);
+//    SetMotorB(motorSpeed, false);
+//  }
+  
   
 }
 void IMUCalculation() {
