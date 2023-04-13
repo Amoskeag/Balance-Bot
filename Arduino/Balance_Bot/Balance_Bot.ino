@@ -221,23 +221,19 @@ void PIDBalance(){
   //Look at the IMUCalculations and see what needs to be done to hold position.
   //ctrlValues[] = {0,0,0,0}; //Target Pitch, Roll, Yaw, and Power.
   //Calculate the nessesary motor values based on the IMU readings for a target setPoint. (generally 0 if the idea is not to move around). I think.
-  IMU.read();
   
-  sensors_event_t a, m ,g, temp;
+  long dT = millis() - lastTime;
   
-  IMU.getEvent(&a, &m, &g, &temp);
+  //float angle = atan2(a.acceleration.y, a.acceleration.z) * 180.0 / PI; This is accPitch.
   
-  deltaT = millis() - lastTime;
+  //err = angle - setPoint;
+  err = accPitch - ctrlValues[0];
   
-  float angle = atan2(a.acceleration.y, a.acceleration.z) * 180.0 / PI;
-
-  err = angle - setPoint;
-
-  integral += err * deltaT;
+  integral += err * dT;
 
   float iTerm = Ki * integral;
   
-  deriv = (err - prevErr) / deltaT;
+  deriv = (err - prevErr) / dT;
 
   int motorSpeed = (Kp * err) + iTerm + (Kd * deriv);
   
