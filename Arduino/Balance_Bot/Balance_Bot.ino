@@ -8,9 +8,7 @@
   VERSION:    0.1
 */
 
-//Playing around with how I interface with my hardware, stay tuned.
-//#include <Arduino_LSM9DS1.h>
-#include <Adafruit_LSM9DS1.h>
+#include <Arduino_LSM9DS1.h>
 
 //Motor Control Variables
 
@@ -34,6 +32,8 @@ int pwmOutB = 0;
 bool aDir = true;
 bool bDir = true;
 
+// - - - - - - - END MOTOR PINS - - - - - - -
+
 //Example PID constants
 int Kp = 2.0;
 int Ki = 0.5;
@@ -45,32 +45,59 @@ float integral = 0.0;
 float prevErr = 0.0;
 float deriv = 0.0;
 
-unsigned long currTime;
-unsigned long deltaT;
-unsigned long lastTime;
+// - - - - - - - END PID VARIABLEs - - - - - - - 
 
-Adafruit_LSM9DS1 IMU = Adafruit_LSM9DS1();
+int motorPower;
+int prevMotorPowers[2]; //Storage of previous motor powers.
+float angleY;
+int targetAngle = 0;
+int sampleCounter = 0;
+int8_t ctrlValues[] = {0,0,0,0}; //Target Pitch, Roll, Yaw, and Power.
+
+const float samplingPeriod = 20;//in s
+long int sampleTimer = 0;
+
+long lastTime;
+long lastInterval;
+
+float Ax,            Ay,             Az,                       // units m/s/s i.e. accelZ if often 9.8 (gravity)
+      Gx,            Gy,             Gz,                       // units dps (degrees per second)
+      gyroDriftX,        gyroDriftY,         gyroDriftZ,        // units dps
+      gyroRoll,          gyroPitch,          gyroYaw,           // units degrees (expect major drift)
+      gyroCorrectedRoll, gyroCorrectedPitch, gyroCorrectedYaw,  // units degrees (expect minor drift)
+      accRoll,           accPitch,           accYaw,            // units degrees (roll and pitch noisy, yaw not possible)
+      complementaryRoll, complementaryPitch, complementaryYaw;  // units degrees (excellent roll, pitch, yaw minor drift)
+    
+int plusThreshold = 30, minusThreshold = -30; //Helps stop if a collision happens.
+
+//Adafruit_LSM9DS1 IMU = Adafruit_LSM9DS1();
 
 void setup() {
- 
-    // Set Nano Pins 
-    pinMode(aIN1, OUTPUT);
-    pinMode(aIN2, OUTPUT);
-    pinMode(PWMA, OUTPUT);
-    
-    pinMode(bIN1, OUTPUT);
-    pinMode(bIN2, OUTPUT);
-    pinMode(PWMB, OUTPUT);
- 
-    // set STBY HIGH and never touch it again, unless the robot falls over, duh? ;)  
-    digitalWrite(STBY, HIGH);
+  // put your setup code here, to run once:
+  if(!IMU.begin()){
+    //Failed to initialize IMU!
+    while(1);
+  }
 
-    //start in a Neutral position.
-    SetMotorA(0, true);
-    SetMotorB(0, true);
+  // Set Nano Pins 
+  pinMode(aIN1, OUTPUT);
+  pinMode(aIN2, OUTPUT);
+  pinMode(PWMA, OUTPUT);
+  
+  pinMode(bIN1, OUTPUT);
+  pinMode(bIN2, OUTPUT);
+  pinMode(PWMB, OUTPUT);
 
-    //Set the starting time.
-    currTime = millis();
+  // set STBY HIGH and never touch it again, unless the robot falls over, duh? ;)  
+  digitalWrite(STBY, HIGH);
+
+  //start in a Neutral position.
+  SetMotorA(0, true);
+  SetMotorB(0, true);
+
+  calibrateIMU(250,250);
+
+  lastTime = micros();
 }
 
 /*
@@ -85,8 +112,8 @@ void setup() {
  *  doesnt go crazy.
  *             
  */
-void SetMotorA(int pwmOutA, bool dir)
-{
+void SetMotorA(int pwmOutA, bool dir) {
+  
   if(dir)
   {
     digitalWrite(aIN1, LOW);   // set leg 1 of the motor driver low
@@ -107,8 +134,8 @@ void SetMotorA(int pwmOutA, bool dir)
  * SetMotorB Speed and Direction. True is forward.
  * Gets called by PIDBalance()
  */
-void SetMotorB(int pwmOutB, bool dir)
-{
+void SetMotorB(int pwmOutB, bool dir) {
+  
   if(dir)
   {
     digitalWrite(bIN1, LOW);   // set leg 1 of the motor driver low
@@ -126,16 +153,73 @@ void SetMotorB(int pwmOutB, bool dir)
   analogWrite(PWMB, speed);
 }
 
+void loop() {
+  // put your main code here, to run repeatedly:
+  /*if(IMU.accelerationAvailable()){
+    IMU.readAcceleration(Ax, Ay, Az);
+  }*/
+  
+  if(IMU.gyroscopeAvailable()){
+    long currentTime = micros();
+    lastInterval = currentTime - lastTime;
+    lastTime = currentTime;
+  }
+
+  IMUCalculation();
+
+  PIDBalance();
+ 
+}
+
+/**
+   Read accel and gyro data.
+   returns true if value is 'new' and false if IMU is returning old cached data
+*/
+bool readIMU() {
+  if (IMU.accelerationAvailable() && IMU.gyroscopeAvailable() ) {
+    IMU.readAcceleration(Ax, Ay, Az);
+    IMU.readGyroscope(Gx, Gy, Gz);
+    return true;
+  }
+  return false;
+}
+
 /*
- * Using PID we will control the robot to target a specific angle (0 deg straight up). 
- *  If the robot leans we will measure the angle off the Z axis so stright up is 0, falling flat forward is 90, 
- *  and falling on its back is -90.
- *  
- *  If the robot goes beyond +/- 45 deg, turn STBY off and pray for the help of an engineer until they create
- *  a little arm to right yourself. 
- */
-void PIDBalance()
-{
+  the gyro's x,y,z values drift by a steady amount. if we measure this when arduino is still
+  we can correct the drift when doing real measurements later
+*/
+void calibrateIMU(int delayMillis, int calibrationMillis) {
+
+  int calibrationCount = 0;
+
+  delay(delayMillis); // to avoid shakes after pressing reset button
+
+  float sumX, sumY, sumZ;
+  int startTime = millis();
+  while (millis() < startTime + calibrationMillis) {
+    IMU.readGyroscope(Gx, Gy, Gz);
+    // in an ideal world gyroX/Y/Z == 0, anything higher or lower represents drift
+    sumX += Gx;
+    sumY += Gy;
+    sumZ += Gz;
+
+    calibrationCount++;
+  
+  }
+
+  if (calibrationCount == 0) {
+    Serial.println("Failed to calibrate");
+  }
+
+  gyroDriftX = sumX / calibrationCount;
+  gyroDriftY = sumY / calibrationCount;
+  gyroDriftZ = sumZ / calibrationCount;
+
+}
+
+void PIDBalance(){
+  //Look at the IMUCalculations and see what needs to be done to hold position.
+  //ctrlValues[] = {0,0,0,0}; //Target Pitch, Roll, Yaw, and Power.
   //Calculate the nessesary motor values based on the IMU readings for a target setPoint. (generally 0 if the idea is not to move around). I think.
   IMU.read();
   
@@ -156,43 +240,30 @@ void PIDBalance()
   deriv = (err - prevErr) / deltaT;
 
   int motorSpeed = (Kp * err) + iTerm + (Kd * deriv);
-
-  //Finally what direction should each motor be in?
-  /*
-   * if(-deg)
-   * {
-   *    //run motors backwards.
-   *    aDir = false;
-   *    bDir = false;
-   * }
-   * if(+deg)
-   * {
-   *    //motors forward
-   *    aDir = true;
-   *    bDir = true;
-   *    
-   * }
-   * else //we are vertical?
-   * {
-   *    Dont move?
-   * }
-   * 
-   * setMotorA(pidOutA, aDir);
-   * setMotorB(pidOutB, bDir);
-   * 
-   * 
-   * Other idea:
-   * motorA->setSpeed(200 + motorSpeed);
-   * motorB->setSpeed(200 - motorSpeed);
-   */
-
-   //Remember this for next call!
-   prevErr = err;
-   lastTime = millis();
+  
 }
+void IMUCalculation() {
+  IMU.readAcceleration(Ax, Ay, Az);
+  IMU.readGyroscope(Gx, Gy, Gz);
+  
+  accRoll = atan2(Ay, Az) * 180 / M_PI;
+  accPitch = atan2(-Ax, sqrt(Ay * Ay + Az * Az)) * 180 / M_PI;
 
-void loop() {
-  // Keep the robot in balance
-  PIDBalance();
- 
+  float lastFrequency = (float) 1000000.0/lastInterval;
+  
+  gyroRoll = gyroRoll + (Gx / lastFrequency);
+  gyroPitch = gyroPitch + (Gy / lastFrequency);
+  gyroYaw = gyroYaw + (Gz / lastFrequency);
+
+  gyroCorrectedRoll = gyroCorrectedRoll + ((Gx - gyroDriftX) / lastFrequency);
+  gyroCorrectedPitch = gyroCorrectedPitch + ((Gy - gyroDriftY) / lastFrequency);
+  gyroCorrectedYaw = gyroCorrectedYaw + ((Gz - gyroDriftZ) / lastFrequency);
+
+  complementaryRoll = complementaryRoll + ((Gx - gyroDriftX) / lastFrequency);
+  complementaryPitch = complementaryPitch + ((Gy - gyroDriftY) / lastFrequency);
+  complementaryYaw = complementaryYaw + ((Gz - gyroDriftZ) / lastFrequency);
+
+  complementaryRoll = 0.98 * complementaryRoll + 0.02 * accRoll;
+  complementaryPitch = 0.98 * complementaryPitch + 0.02 * accPitch;
+  
 }
